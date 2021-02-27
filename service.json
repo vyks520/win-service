@@ -1,9 +1,8 @@
 {
-  "name": "test",
-  "display_name": "test",
-  "description": "test",
-  "executable": "test.exe",
-  "work_dir": "",
-  "executable_args": [],
-  "stop_args":""
+  "name": "nginx",
+  "display_name": "Nginx Service",
+  "description": "Nginx Service",
+  "executable": "nginx.exe",
+  "executable_args": "",
+  "stop_args":"-s stop"
 }
