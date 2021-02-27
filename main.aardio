@@ -1,0 +1,158 @@
+//RUNAS//
+import service
+import web.json;
+import thread;
+import console;
+
+global.onError = function( err,over ){ 
+    if(!over){
+        import debug;
+        var stack = debug.traceback(,"调用栈",3);
+    }
+    
+    service.msgbox(err);
+    if( _STUDIO_INVOKED ) return err; 
+}
+
+var configStr = string.load("service.json");
+if(!#configStr){
+	configStr = string.load(io.fullpath("~\service.json"));
+}
+
+if(!#configStr){
+    service.msgbox("service.json读取失败");
+    return; 
+}
+
+var serviceConfig = web.json.tryParse(configStr);
+if(serviceConfig == null || type(serviceConfig) !== type.table){
+    service.msgbox("service.json解析失败");
+    return; 
+}
+if(!#serviceConfig.name){
+    service.msgbox("serviceName不能为空");
+	return; 
+}
+if(!#serviceConfig.executable){
+    service.msgbox("executable不能为空");
+	return; 
+}
+
+//判断文件是否存在并获取绝对路径，解决executable不是绝对路径时工作路径不正确的问题
+var executable = io.exist(serviceConfig.executable); //判断是否绝对路径
+if(!executable){
+    //绝对路径方式没有在执行文件目录下查找
+    executable = io.exist("~\" ++ serviceConfig.executable);
+}
+//执行找不到时可能是系统命令，不需要工作目录，无需获取绝对路径
+if(executable){
+	serviceConfig.executable = executable;
+}
+
+//启动后默认打开控制台则不是以服务方式运行的
+//服务运行 true
+//控制台运行 false
+var isServiceRun = !::Kernel32.GetConsoleWindow() && !_STUDIO_INVOKED;
+serviceConfig.isServiceRun = isServiceRun;
+
+thread.set("serviceConfig",serviceConfig);
+service.serviceName = serviceConfig.name;
+
+//安装或卸载服务
+var commandParam = _CMDLINE;
+if(!#commandParam){
+	commandParam = "";
+}
+commandParam = string.trim(commandParam,'"');
+commandParam = string.trim(commandParam,' ');
+
+if(#commandParam && commandParam != "run"){
+	import service.threads;
+    service.threads.simpleCommandToolRun(serviceConfig,commandParam);
+	return; 
+}elseif(!isServiceRun) {
+	console.log("------可以通过命令参数管理服务，或直接键盘交互管理服务------");
+	console.log("------“run”控制台运行---------------------------------------");
+	console.log("------“start”启动服务---------------------------------------");
+	console.log("------“stop”停止服务----------------------------------------");
+	console.log("------“install”注册后台服务---------------------------------");
+	console.log("------“remove”卸载后台服务----------------------------------");
+	console.log("------------------------------------------------------------");
+}
+
+if(commandParam != "run" && !isServiceRun){
+	import service.threads;
+	service.threads.simpleToolRun(serviceConfig.name,serviceConfig.display_name,serviceConfig.description);
+	return; 
+}
+
+console.setCtrlHandlerThread( function(ctrlType){
+	import service;
+	import service.threads;
+	
+	var serviceExeID = thread.get("serviceExeID");
+	var serviceConfig = thread.get("serviceConfig");
+	service.threads.stop(serviceConfig,serviceExeID);
+});
+
+if(isServiceRun && commandParam != "run"){
+	import service.simpleTool;	
+	//这个函数用于在进程主线程中启动服务，并且会等待所有服务线程执行结束后才会返回
+	service.startDispatchThread(
+	
+    	//可以增加多个服务名与服务线程回调函数的键值对
+    	[service.serviceName] = function(serviceName,argv){ //注意此服务回调函数运行于独立线程
+        	import service.threads;
+        	import console;
+        	
+        	//服务线程启动后第一件事应当是注册服务控制线程
+        	var srvStatus = service.registerCtrlThread(serviceName,service.threads.control)
+        	
+        	//服务切换到运行状态
+        	srvStatus.controlsAccepted = 0x1/*_SERVICE_ACCEPT_STOP*/ 
+        	srvStatus.currentState = 0x4/*_SERVICE_RUNNING*/;
+        	service.updateStatus(srvStatus,serviceName);
+         	
+         	
+            var serviceConfig = thread.get("serviceConfig");
+         	var prcs = service.threads.run(serviceName,serviceConfig.executable,serviceConfig.executable_args,serviceConfig.isServiceRun);
+			if(!prcs){
+				return; 
+			}
+			
+			thread.set("serviceExeID",prcs.id);
+			
+    		//启动服务主线程
+    		service.threads.main(serviceName);
+         	
+        	//服务切换到停止状态
+        	srvStatus.controlsAccepted = 0;
+        	srvStatus.currentState = 0x1/*_SERVICE_STOPPED*/
+        	service.updateStatus(srvStatus,serviceName)
+    	}
+	)
+}
+else {
+	/*
+	后台服务可在系统启动时自动运行。
+	后台服务程序本质也是一个控制台程序，
+	因为后台服务调试不便，开发环境下可以这样启动服务主线程，作为一个普通控制台程序进行调试。 
+	
+	发布后在服务进程中启动以后,不能在用户桌面上直接显示界面，
+	但可以使用 service.msgbox() 等函数在当前用户桌面上显示交互对话框。
+	如果需要在桌面显示控制台输出，请在控制面板->管理工具->服务管理器中右键点击注册的服务，属性中勾选：本地系统服务->允许与桌面交互。
+	
+	编写服务程序,可以调用fsys.log输出日志文件记录运行状态以及错误信息.
+	*/
+	import service.threads;
+	var prcs = service.threads.run(service.serviceName,serviceConfig.executable,serviceConfig.executable_args,isServiceRun);
+	if(!prcs){
+		return; 
+	}
+	
+	thread.set("serviceExeID",prcs.id);
+	
+    //启动服务主线程
+    service.threads.main(service.serviceName);
+    prcs.terminate();
+}

@@ -1,0 +1,7 @@
+﻿{
+    name = "ping";
+    display_name = "ping";
+    description = "ping test";
+    executable = "ping";
+    executable_args = {"127.0.0.1";"-t"}
+}

@@ -1,0 +1,211 @@
+
+namespace service.threads;
+
+//服务主线程
+main = function(serviceName){
+	import service;
+	import thread.event; 
+	import fsys.log;
+	import console;
+	
+	//service.msgbox("服务已启动");
+	console.open();
+	
+	var evt = thread.event("NT.SERVICE.CONTROL." + serviceName,false);
+	while( ! evt.wait(1000) ){  //每1000毫秒执行一次
+		//fsys.log.print(..time.tick()+' 服务主线程\r\n');
+		//console.log(..time.tick()+' 服务主线程\r\n');
+	} 
+}
+
+//注意这也是一个独立的线程，用户控制服务停止或启动时都会触发此函数
+control = function(control,eventType,pEventData){ 
+    import service;
+    import thread.event;
+    
+    var evtTask = thread.event("NT.SERVICE.CONTROL." + owner.serviceName,false); 
+    
+    if( control == 0x1/*_SERVICE_CONTROL_STOP*/ ){  
+        //控制线程中更新srvStatus，第一个参数只要指定需要更新的字段就行了
+        service.updateStatus({currentState = 0x3/*_SERVICE_STOP_PENDING*/},owner.serviceName);
+        evtTask.set();//使事件对象切换为有信号状态,使wait函数退出  
+    }
+     
+    return 0x0/*_NOERROR*/
+}
+
+
+run = function(serviceName,executable,executable_args,isServiceRun){
+	import fsys;
+    import thread.event;
+    import service;
+    import console;
+    
+    
+	console.log("");
+	console.log("");
+	console.log("");
+	console.log("");
+	var prcs = ..process( executable, executable_args);
+	if(prcs == null){
+        service.msgbox(executable ++ "执行失败",serviceName);
+		return; 
+	}
+	console.log(executable ++ " 启动成功！");
+	//不是以服务方式启动直接返回    
+	if(!isServiceRun || _STUDIO_INVOKED) return prcs;
+	
+    //监听启动的进程，进程停止同步停止主进程服务
+	thread.invoke(
+    	function(prcs,serviceName){
+        	import service;
+    		if(prcs == null){
+    			service.stop(serviceName,true);
+    		}
+        	while(true){
+				var ok,code = ..process.GetExitCodeProcess(prcs.handle , 0);
+            	if(!(ok && code == 0x103/*_STILL_ACTIVE*/)){
+            		service.stop(serviceName,true);
+            		return; 
+            	}
+            	sleep(1000);
+        	}
+    	},
+    	prcs,
+    	serviceName
+    );
+    return prcs; 
+}
+
+stop = function(serviceConfig,serviceExeID){
+	import service;
+    var prcs = null;
+	if(#serviceConfig.stop_args){
+		prcs = ..process( serviceConfig.executable, serviceConfig.stop_args);
+	}
+	if(!prcs){
+		prcs = ..process(serviceExeID);
+	}
+	if(prcs){
+		sleep(500);
+		prcs.terminate();
+	}
+}
+
+simpleToolRun = function(serviceName,displayName,description){
+	import service;
+	import console;
+	do{
+		if( service.isExist(serviceName) ){
+			console.log("服务[" + serviceName + "] 已安装")
+			
+			if( service.isRunning(serviceName) ){
+				console.log("服务[" + serviceName + "] 正在运行")
+				if( console.askYesNo("按Y键停止服务,按N键退出程序") ){
+			 		if( service.stop(serviceName) ){
+			 			sleep(500);
+			 			console.log("操作成功",serviceName);
+			 		}
+			 		else {
+			 			service.stop(serviceName,true);
+			 			sleep(500);
+			 		}
+				}
+				else {
+			 		return true;
+				}
+			}
+			else{
+				console.log("服务[" + serviceName + "] 已停止运行")
+				if( console.askYesNo("按Y键启动服务,按N键删除后台服务") ){
+			 		if( service.start(serviceName)  ){
+			 			sleep(500);
+			 			console.log("操作成功",serviceName);
+			 		} 
+			 		else {
+						console.log("启动服务失败",..lasterr()); 
+					}
+				}
+				else {
+					//停止服务再删除服务，避免导致服务标记为删除，服务列表还存在，需重启电脑
+					service.stop(serviceName);
+					sleep(500);
+			 		if(!service.delete( serviceName) ){
+			 			console.log("删除服务失败,请重启系统后再试",..lasterr());
+			 		}//最好不要同时打开服务管理器
+			 		sleep(500);
+				}
+			}
+		}
+		else{
+			console.log("服务[" + serviceName + "] 未安装")
+			if( console.askYesNo("按Y键注册后台服务,按N键退出程序") ){
+				if( service.create( ,serviceName,displayName:serviceName,description:serviceName)  ){
+			 		console.log("注册成功",serviceName)
+				} 
+				else {
+					console.log(..lasterr());
+				}
+				
+			}
+			else {
+				return true;
+			}
+		}
+	}while(true)
+}
+
+simpleCommandToolRun = function(serviceConfig,commandParam){
+    import console;
+    import service;
+    var serviceName = serviceConfig.name;
+    select(commandParam) {
+    	case "install" {
+    		if(service.create( ,serviceName,serviceConfig.display_name:serviceName,serviceConfig.description:serviceName)  ){
+				console.log("注册成功",serviceName);
+			} 
+			else {
+				console.log(..lasterr());
+			}
+    	}
+    	case "remove" {
+        	if( service.stop(serviceName) ){
+				sleep(500);
+				console.log("服务停止成功",serviceName);
+			}
+			else {
+				service.stop(serviceName,true);
+				sleep(500);
+				console.log("服务强制停止",serviceName);
+			}
+        	if(service.delete( serviceName) ){
+				console.log("服务删除成功");
+			}else {
+				console.log("服务删除失败,请重启系统后再试",..lasterr());
+			}
+    	}
+    	case "start" {
+    		if( service.start(serviceName)  ){
+				sleep(500);
+				console.log("服务启动成功",serviceName);
+			} 
+			else {
+				console.log("服务启动失败",..lasterr()); 
+			}
+    	}
+    	case "stop" {
+    		if( service.stop(serviceName) ){
+				sleep(500);
+				console.log("服务停止成功",serviceName);
+			}
+			else {
+				service.stop(serviceName,true);
+				sleep(500);
+				console.log("服务强制停止",serviceName);
+			}
+    	}
+    	else {
+    		console.log("“" ++ commandParam ++ "”参数不支持");
+    	}
+    }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "test",
+  "display_name": "test",
+  "description": "test",
+  "executable": "test.exe",
+  "work_dir": "",
+  "executable_args": [],
+  "stop_args":""
+}
