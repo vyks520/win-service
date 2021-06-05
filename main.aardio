@@ -10,7 +10,7 @@ global.onError = function( err,over ){
         var stack = debug.traceback(,"调用栈",3);
     }
     
-    service.msgbox(err);
+    service.msgboxErr(err);
     if( _STUDIO_INVOKED ) return err; 
 }
 
@@ -20,21 +20,27 @@ if(!#configStr){
 }
 
 if(!#configStr){
-    service.msgbox("service.json读取失败");
+    service.msgboxErr("service.json读取失败");
+    return; 
+}
+
+//配置文件存在中文等字符时字符编码必须是UT8格式
+if(#string.match(configStr,'[\x80-\xFF]+') && !string.isUtf8(configStr)){
+    service.msgboxErr("service.json只支持UTF8编码格式");
     return; 
 }
 
 var serviceConfig = web.json.tryParse(configStr);
 if(serviceConfig == null || type(serviceConfig) !== type.table){
-    service.msgbox("service.json解析失败");
+    service.msgboxErr("service.json解析失败");
     return; 
 }
 if(!#serviceConfig.name){
-    service.msgbox("serviceName不能为空");
+    service.msgboxErr("serviceName不能为空");
 	return; 
 }
 if(!#serviceConfig.executable){
-    service.msgbox("executable不能为空");
+    service.msgboxErr("executable不能为空");
 	return; 
 }
 
@@ -107,16 +113,21 @@ if(isServiceRun && commandParam != "run"){
         	
         	//服务线程启动后第一件事应当是注册服务控制线程
         	var srvStatus = service.registerCtrlThread(serviceName,service.threads.control)
-        	
+
+         	
+            var serviceConfig = thread.get("serviceConfig");
+
         	//服务切换到运行状态
         	srvStatus.controlsAccepted = 0x1/*_SERVICE_ACCEPT_STOP*/ 
         	srvStatus.currentState = 0x4/*_SERVICE_RUNNING*/;
         	service.updateStatus(srvStatus,serviceName);
-         	
-         	
-            var serviceConfig = thread.get("serviceConfig");
+
          	var prcs = service.threads.run(serviceName,serviceConfig.executable,serviceConfig.executable_args,serviceConfig.isServiceRun);
 			if(!prcs){
+				//服务切换到停止状态
+        	    srvStatus.controlsAccepted = 0;
+        	    srvStatus.currentState = 0x1/*_SERVICE_STOPPED*/
+        	    service.updateStatus(srvStatus,serviceName)
 				return; 
 			}
 			
@@ -146,6 +157,7 @@ else {
 	*/
 	import service.threads;
 	var prcs = service.threads.run(service.serviceName,serviceConfig.executable,serviceConfig.executable_args,isServiceRun);
+	
 	if(!prcs){
 		return; 
 	}

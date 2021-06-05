@@ -48,7 +48,7 @@ run = function(serviceName,executable,executable_args,isServiceRun){
 	console.log("");
 	var prcs = ..process( executable, executable_args);
 	if(prcs == null){
-        service.msgbox(executable ++ "执行失败",serviceName);
+        service.msgboxErr(executable ++ "执行失败",serviceName);
 		return; 
 	}
 	console.log(executable ++ " 启动成功！");
@@ -61,6 +61,7 @@ run = function(serviceName,executable,executable_args,isServiceRun){
         	import service;
     		if(prcs == null){
     			service.stop(serviceName,true);
+			 	sleep(500);
     		}
         	while(true){
 				var ok,code = ..process.GetExitCodeProcess(prcs.handle , 0);
